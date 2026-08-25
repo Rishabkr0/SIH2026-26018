@@ -14,3 +14,9 @@ def event_loop():
 async def async_client():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
+
+@pytest_asyncio.fixture
+async def db_session():
+    from app.db.session import async_session_maker
+    async with async_session_maker() as session:
+        yield session
