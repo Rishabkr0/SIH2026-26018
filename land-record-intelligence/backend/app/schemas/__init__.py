@@ -1,4 +1,4 @@
-from .document import DocumentBase, DocumentResponse
+from .document import DocumentBase, DocumentResponse, DocumentUploadResponse
 from .land_record import (
     LandRecordBase, 
     LandRecordResponse, 
@@ -6,13 +6,16 @@ from .land_record import (
     ExtractedFieldResponse, 
     ValidationFindingResponse
 )
+from .processing import ProcessingJobResponse
 
 __all__ = [
     "DocumentBase",
     "DocumentResponse",
+    "DocumentUploadResponse",
     "LandRecordBase",
     "LandRecordResponse",
     "LandRecordDetailResponse",
     "ExtractedFieldResponse",
-    "ValidationFindingResponse"
+    "ValidationFindingResponse",
+    "ProcessingJobResponse"
 ]

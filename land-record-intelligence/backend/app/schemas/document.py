@@ -20,3 +20,7 @@ class DocumentResponse(DocumentBase):
     updated_at: datetime
     
     model_config = ConfigDict(from_attributes=True)
+
+class DocumentUploadResponse(BaseModel):
+    document: DocumentResponse
+    processing_job_id: UUID

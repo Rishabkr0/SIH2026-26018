@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     MINIO_BUCKET: str = "land-records"
 
     CORS_ALLOWED_ORIGINS: str = ""
+    
+    MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10MB default
+    ALLOWED_MIME_TYPES: List[str] = ["application/pdf", "image/jpeg", "image/png"]
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

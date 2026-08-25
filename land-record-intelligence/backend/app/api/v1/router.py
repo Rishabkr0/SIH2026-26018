@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+from fastapi.responses import StreamingResponse
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, select
 from sqlalchemy.orm import selectinload
@@ -10,9 +12,12 @@ from app.db.redis_client import redis_client
 from app.storage.minio_client import minio_client
 
 from app.models.document import Document
+from app.models.processing import ProcessingJob
 from app.models.land_record import LandRecord, RecordStatus
-from app.schemas.document import DocumentResponse
+from app.schemas.document import DocumentResponse, DocumentUploadResponse
+from app.schemas.processing import ProcessingJobResponse
 from app.schemas.land_record import LandRecordResponse, LandRecordDetailResponse
+from app.services.document_service import process_document_upload
 
 router = APIRouter()
 
@@ -56,6 +61,17 @@ async def health_check(db: AsyncSession = Depends(get_db)):
 
     return payload
 
+@router.post("/documents", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_document(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db)
+):
+    doc, job = await process_document_upload(file, db)
+    return DocumentUploadResponse(
+        document=doc,
+        processing_job_id=job.id
+    )
+
 @router.get("/documents", response_model=List[DocumentResponse])
 async def list_documents(
     skip: int = Query(0, ge=0),
@@ -72,6 +88,43 @@ async def get_document(document_id: UUID, db: AsyncSession = Depends(get_db)):
     if not doc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     return doc
+
+@router.get("/documents/{document_id}/file")
+async def get_document_file(document_id: UUID, db: AsyncSession = Depends(get_db)):
+    doc = await db.get(Document, document_id)
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    
+    try:
+        response = await run_in_threadpool(minio_client.get_object, doc.storage_key)
+        
+        def iterfile():
+            try:
+                for chunk in response.stream(32 * 1024):
+                    yield chunk
+            finally:
+                response.release_conn()
+                
+        return StreamingResponse(
+            iterfile(),
+            media_type=doc.content_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{doc.original_filename}"'
+            }
+        )
+    except Exception as e:
+        # Minio error
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found in storage")
+
+@router.get("/documents/{document_id}/processing", response_model=ProcessingJobResponse)
+async def get_processing_job(document_id: UUID, db: AsyncSession = Depends(get_db)):
+    query = select(ProcessingJob).where(ProcessingJob.document_id == document_id)
+    result = await db.execute(query)
+    job = result.scalars().first()
+    
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processing job not found")
+    return job
 
 @router.get("/records", response_model=List[LandRecordResponse])
 async def list_records(
