@@ -21,13 +21,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # Enums
-    op.execute("CREATE TYPE userrole AS ENUM ('OPERATOR', 'VERIFIER', 'ADMIN', 'SYSTEM_ADMIN')")
-    op.execute("CREATE TYPE documentstatus AS ENUM ('UPLOADED', 'PROCESSING', 'PROCESSED', 'REVIEW_REQUIRED', 'VERIFIED', 'REJECTED', 'FAILED')")
-    op.execute("CREATE TYPE jobstatus AS ENUM ('PENDING', 'RUNNING', 'COMPLETED', 'FAILED')")
-    op.execute("CREATE TYPE recordstatus AS ENUM ('PENDING_VERIFICATION', 'VERIFIED', 'REJECTED', 'CONFLICT')")
-    op.execute("CREATE TYPE findingstatus AS ENUM ('OPEN', 'RESOLVED', 'DISMISSED')")
-    op.execute("CREATE TYPE findingseverity AS ENUM ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')")
 
     # Tables
     op.create_table('users',

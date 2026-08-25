@@ -9,9 +9,14 @@ class ProcessingJobResponse(BaseModel):
     id: UUID
     document_id: UUID
     status: JobStatus
+    queued_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    failed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    retry_count: int = 0
+    worker_id: Optional[str] = None
+    job_metadata: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
     

@@ -19,7 +19,10 @@ from app.schemas.processing import ProcessingJobResponse
 from app.schemas.land_record import LandRecordResponse, LandRecordDetailResponse
 from app.services.document_service import process_document_upload
 
+from app.api.v1.endpoints import ocr
+
 router = APIRouter()
+router.include_router(ocr.router, tags=["ocr"])
 
 @router.get("/health", status_code=status.HTTP_200_OK)
 async def health_check(db: AsyncSession = Depends(get_db)):
@@ -124,6 +127,59 @@ async def get_processing_job(document_id: UUID, db: AsyncSession = Depends(get_d
     
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processing job not found")
+    return job
+
+@router.post("/documents/{document_id}/process", response_model=ProcessingJobResponse)
+async def manually_process_document(document_id: UUID, db: AsyncSession = Depends(get_db)):
+    """
+    Manually enqueue an existing document for processing.
+    """
+    from datetime import datetime, timezone
+    from app.processing.queue import ProcessingQueue
+    from app.models.processing import JobStatus
+    
+    # 1. Check if document exists
+    doc = await db.get(Document, document_id)
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        
+    # 2. Check existing job
+    query = select(ProcessingJob).where(ProcessingJob.document_id == document_id)
+    result = await db.execute(query)
+    job = result.scalars().first()
+    
+    if not job:
+        # Create one if missing
+        job = ProcessingJob(
+            document_id=document_id,
+            status=JobStatus.PENDING
+        )
+        db.add(job)
+        await db.commit()
+        await db.refresh(job)
+        
+    # 3. If already queued or processing, return conflict
+    if job.status in [JobStatus.QUEUED, JobStatus.PROCESSING]:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, 
+            detail=f"Job is already in {job.status.value} state."
+        )
+        
+    # 4. Enqueue
+    enqueue_success = await ProcessingQueue.enqueue_job(str(job.id))
+    
+    if enqueue_success:
+        job.status = JobStatus.QUEUED
+        job.queued_at = datetime.now(timezone.utc)
+        job.error_message = None # Reset error if it was FAILED
+    else:
+        job.status = JobStatus.FAILED
+        job.failed_at = datetime.now(timezone.utc)
+        job.error_message = "Failed to manually enqueue job to Redis."
+        
+    db.add(job)
+    await db.commit()
+    await db.refresh(job)
     return job
 
 @router.get("/records", response_model=List[LandRecordResponse])

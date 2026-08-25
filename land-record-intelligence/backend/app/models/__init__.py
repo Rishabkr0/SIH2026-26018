@@ -5,6 +5,7 @@ from .land_record import LandRecord, ExtractedField, RecordStatus
 from .validation import ValidationFinding, FindingStatus, FindingSeverity
 from .correction import FieldCorrection
 from .audit import AuditEvent
+from .ocr import OCRDocumentResult, OCRPageResult, OCRBlock, OCRStatus
 
 __all__ = [
     "User",
@@ -20,5 +21,9 @@ __all__ = [
     "FindingStatus",
     "FindingSeverity",
     "FieldCorrection",
-    "AuditEvent"
+    "AuditEvent",
+    "OCRDocumentResult",
+    "OCRPageResult",
+    "OCRBlock",
+    "OCRStatus"
 ]

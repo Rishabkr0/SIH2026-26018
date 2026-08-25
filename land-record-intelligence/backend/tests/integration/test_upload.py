@@ -26,13 +26,11 @@ async def test_upload_oversized_file(async_client: AsyncClient):
     assert "File too large" in response.json()["detail"]
 
 @pytest.mark.asyncio
-async def test_upload_valid_file_infrastructure_offline(async_client: AsyncClient):
-    # This tests the happy path up to the point where it attempts to contact MinIO/PostgreSQL
-    # Since the local test environment lacks Docker daemon, it should fail with a 500 error gracefully
-    file_content = b"%PDF-1.4 fake pdf content"
-    files = {"file": ("test.pdf", io.BytesIO(file_content), "application/pdf")}
+async def test_upload_valid_file(async_client: AsyncClient, test_pdf: bytes):
+    files = {"file": ("test.pdf", test_pdf, "application/pdf")}
     
     response = await async_client.post("/api/v1/documents", files=files)
     
-    # We expect a 500 Internal Server Error because the DB/MinIO connection is offline locally
-    assert response.status_code == 500
+    assert response.status_code == 201
+    assert "document" in response.json()
+    assert "processing_job_id" in response.json()

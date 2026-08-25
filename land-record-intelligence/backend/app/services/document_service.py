@@ -82,7 +82,25 @@ async def process_document_upload(file: UploadFile, db: AsyncSession):
         db.add(new_job)
         
         await db.commit()
-        await db.refresh(new_doc)
+        await db.refresh(new_job)
+        
+        # 3. Enqueue Job
+        from app.processing.queue import ProcessingQueue
+        from datetime import datetime, timezone
+        
+        enqueue_success = await ProcessingQueue.enqueue_job(str(new_job.id))
+        
+        if enqueue_success:
+            new_job.status = JobStatus.QUEUED
+            new_job.queued_at = datetime.now(timezone.utc)
+        else:
+            new_job.status = JobStatus.FAILED
+            new_job.failed_at = datetime.now(timezone.utc)
+            new_job.error_message = "Failed to enqueue job to Redis."
+            logger.error(f"Failed to enqueue job {new_job.id}")
+            
+        db.add(new_job)
+        await db.commit()
         await db.refresh(new_job)
         
         return new_doc, new_job
