@@ -1,36 +1,31 @@
 # External Services
 
-## REQUIRED
+*Note: All services below comply with the ZERO MANDATORY COST requirement for the MVP.*
 
-### 1. OCR Provider
-- **Purpose**: Convert images to text and bounding boxes.
-- **Why Needed**: Core prerequisite for extraction.
-- **API Key**: Yes.
-- **Fallback**: Tesseract (Local).
-- **Cost**: Low/Free-tier for hackathon (e.g., Google Cloud Vision, Azure AI Vision).
+## CORE — FREE / LOCAL
 
-### 2. Large Language Model / Vision-Language Model
-- **Purpose**: Intelligent structured field extraction from raw OCR text/images.
-- **Why Needed**: Handles the highly variable layouts of legacy records better than regex/templates.
-- **API Key**: Yes.
-- **Fallback**: Local small-LLM (e.g., Llama 3 via Ollama) if hardware permits, though slower.
-- **Cost**: API usage costs (e.g., OpenAI, Anthropic, Gemini).
+These technologies are the defaults and form the mandatory zero-cost baseline.
 
-## OPTIONAL / MOCKABLE
+- **OCR**: PaddleOCR / Tesseract (Local, Open-Source)
+- **Extraction**: Rules + local/open-source models (via `LocalModelProvider` / `OllamaAdapter`)
+- **Storage**: MinIO (Local, AGPL v3)
+- **Database**: PostgreSQL + PostGIS (Local, Open-Source)
+- **Queue**: Redis + Celery (Local, Open-Source)
+- **GIS Frontend**: Leaflet or MapLibre
+- **GIS Tiles**: Permitted open map/tile source (subject to usage policies) OR locally available demo map data. 
 
-### 3. Object Storage
-- **Purpose**: Store raw PDFs and processed images securely.
-- **Why Needed**: DB should not store large blobs directly.
-- **API Key**: No (Use local MinIO).
-- **Local Alternative**: Local file system volume.
+## OPTIONAL
 
-### 4. GIS Map Tiles
-- **Purpose**: Render background map for the GIS prototype.
-- **Why Needed**: Context for parcel polygons.
-- **API Key**: No (Can use OpenStreetMap public tiles).
+These adapters are supported architecturally but must NEVER appear in the P0 dependency chain. They require paid subscriptions or API keys.
+
+- **Commercial OCR**: Google Cloud Vision, Azure AI Vision
+- **Commercial LLM/VLM**: OpenAI, Anthropic, Google Gemini
+- **Managed Cloud Storage**: AWS S3, Azure Blob
+- **Managed Database**: AWS RDS, Azure Database for PostgreSQL
+- **Cloud GPU**: Rented instances for running heavy local models
+- **Commercial Geocoding / Tile Providers**: Google Maps API, Mapbox, ArcGIS Online
 
 ## FUTURE (Out of Hackathon Scope)
 
-### 5. Government LRMS / DILRMP Endpoints
-- **Purpose**: Cross-check extracted data against authoritative state databases.
-- **Fallback**: Mock APIs via internal Python routes.
+- **Government Integrations**: Live connections to state LRMS, DILRMP, or state GIS systems. For the prototype, these are handled strictly via Mock Adapters.
+- **Production GIS**: Self-hosted tile infrastructure or integration with official government spatial services.

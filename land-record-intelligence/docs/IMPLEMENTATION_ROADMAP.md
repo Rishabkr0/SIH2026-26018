@@ -1,64 +1,55 @@
 # Implementation Roadmap
 
+*Note: All phases must be executed using free/open-source tools as the P0 baseline.*
+
 ## PHASE A: Product + UX
 - **Dependencies**: None.
-- **Deliverables**: PRD, Architecture Docs, Wireframes/Screen designs.
-- **Acceptance Criteria**: Team agrees on MVP scope and UI layout.
+- **Deliverables**: PRD, Architecture Docs, Wireframes.
 
 ## PHASE B: Design System / Frontend Setup
 - **Dependencies**: Phase A.
-- **Deliverables**: React/Vite initialized, Tailwind configured, UI components (Buttons, Modals, Tables) created.
+- **Deliverables**: React/Vite, Tailwind, shadcn/ui.
 
 ## PHASE C: Engineering Foundation
 - **Dependencies**: Phase A.
-- **Deliverables**: FastAPI setup, PostgreSQL DB, MinIO setup, Docker Compose.
-- **Acceptance Criteria**: Backend starts, connects to DB, migrations run.
+- **Deliverables**: FastAPI setup, PostgreSQL + PostGIS DB configured, MinIO setup, Docker Compose. (All Free).
 
 ## PHASE D: Database + APIs
 - **Dependencies**: Phase C.
-- **Deliverables**: SQLAlchemy models, CRUD endpoints for Documents and Records.
+- **Deliverables**: SQLAlchemy models (using GeoAlchemy2 for spatial geometries), CRUD endpoints.
 
-## PHASE E: Document Pipeline
+## PHASE E: Document Pipeline (Standardized Async)
 - **Dependencies**: Phase C, D.
-- **Deliverables**: File upload, storage in MinIO, basic background task trigger.
+- **Deliverables**: File upload, storage in MinIO, Redis broker setup, and Celery background task worker configured.
 
-## PHASE F: OCR/HTR
+## PHASE F: Local OCR (Provider Implementation)
 - **Dependencies**: Phase E.
-- **Deliverables**: OCR Provider integration. Extraction of raw text and bounding boxes.
+- **Deliverables**: `OCRProvider` interface created. Default `PaddleOCRProvider` integrated inside Celery workers. (Optional commercial adapters stubbed but not used).
 
-## PHASE G: Extraction
+## PHASE G: Layered Extraction (Provider Implementation)
 - **Dependencies**: Phase F.
-- **Deliverables**: LLM/VLM integration to map raw text to structured JSON fields.
+- **Deliverables**: `ExtractionProvider` interface created. Layered default implementation: Deterministic rules -> Local Model (via `LocalModelProvider` / `OllamaAdapter`). Implements explicit fallback logic to Human Verification on failure.
 
 ## PHASE H: Confidence + Validation
 - **Dependencies**: Phase G.
-- **Deliverables**: Logic to score confidence, run rules (missing fields, format checks).
+- **Deliverables**: Logic inside Celery to score confidence, run rules, and check PostGIS for duplicates. Emphasizes LOW CONFIDENCE -> REVIEW REQUIRED for difficult handwriting.
 
 ## PHASE I: Human Verification
 - **Dependencies**: Phase B, H.
-- **Deliverables**: Side-by-side UI, ability to edit fields, approve/reject, and write to Audit log.
-- **CRITICAL**: Do NOT start until Extraction (Phase G) produces reliable JSON.
+- **Deliverables**: Side-by-side UI, FastAPI endpoints to edit fields, approve/reject, and log audit.
 
-## PHASE J: Search / Dashboard / GIS
+## PHASE J: Search / Dashboard / GIS (P1 capabilities)
 - **Dependencies**: Phase I.
-- **Deliverables**: KPI queries, charts, basic map rendering.
+- **Deliverables**: KPI queries, spatial lookup/filtering using PostGIS, Leaflet map rendering with synthetic/mock geometries.
 
 ## PHASE K: Integration Adapters
 - **Dependencies**: Phase H.
-- **Deliverables**: Mock LRMS endpoints and conflict detection against them.
+- **Deliverables**: Mock LRMS and Government GIS endpoints running on FastAPI.
 
 ## PHASE L: Testing
 - **Dependencies**: Phases E-K.
-- **Deliverables**: Unit tests for validation rules, End-to-End manual testing of demo flow.
+- **Deliverables**: Pytest/Vitest/Playwright tests verifying fallback behaviors and offline capabilities.
 
-## PHASE M: Security
+## PHASE M: Security & Deployment
 - **Dependencies**: Ongoing.
-- **Deliverables**: JWT Auth, Role checks on APIs.
-
-## PHASE N: Deployment
-- **Dependencies**: Phase L, M.
-- **Deliverables**: Deployed to cloud (e.g., AWS/GCP/Render) or packaged for local demo.
-
-## PHASE O: Hackathon Demo Hardening
-- **Dependencies**: All.
-- **Deliverables**: Controlled dataset loaded, known conflict scenarios prepared, demo script finalized.
+- **Deliverables**: Local Docker-compose deployment profiles (Profile A & B).

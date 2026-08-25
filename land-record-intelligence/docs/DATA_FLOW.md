@@ -2,43 +2,68 @@
 
 ## 1. Document Ingestion
 - **Input**: User uploads PDF/JPG.
-- **Processing**: Validate MIME type, generate SHA-256 checksum, assign UUID.
-- **Output**: Document record created, file moved to permanent storage.
-- **Storage**: MinIO (`/raw/{uuid}.pdf`), PostgreSQL (`documents` table).
-- **Errors**: `UPLOAD_FAILED`, `INVALID_FORMAT`.
+- **Processing (FastAPI)**: Validate MIME type, generate checksum, assign UUID.
+- **Output**: Document record created, file moved to MinIO, and job dispatched to Celery.
+- **Storage**: MinIO, PostgreSQL.
 
-## 2. Preprocessing
-- **Input**: Raw document from MinIO.
-- **Processing**: Page extraction, deskew, denoising via OpenCV.
-- **Output**: Cleaned images per page.
-- **Storage**: MinIO (`/processed/{uuid}/page_1.png`).
-- **Traceability**: Processed files linked back to raw document UUID.
+## 2. Asynchronous Processing Pipeline (Celery)
+The entire heavy-lifting pipeline runs inside dedicated Celery workers polling from Redis.
 
-## 3. OCR & Intelligence
-- **Input**: Processed page images.
-- **Processing**: Send to OCR Provider; retrieve bounding boxes and text. Send text/image to Extraction Model.
-- **Output**: JSON containing raw text, structured fields (Owner, Khasra, Area), and confidence scores.
-- **Storage**: PostgreSQL (`field_extractions` table). MinIO (`/ocr/{uuid}.json`).
-- **Errors**: `OCR_FAILED`, `EXTRACTION_FAILED`. Retry allowed.
+**Pipeline Flow:**
+```text
+UPLOAD
+ ↓
+QUEUED
+ ↓
+PREPROCESSING
+ ↓
+OCR_PROCESSING
+ ↓
+EXTRACTING
+ ↓
+CONFIDENCE_CALCULATION
+ ↓
+VALIDATING & RISK_CLASSIFICATION
+ ↓
+REVIEW_QUEUE (Human Reviewer)
+ ↓
+VERIFIED / REJECTED
+ ↓
+COMPLETED
+```
 
-## 4. Confidence & Validation
-- **Input**: Structured JSON extractions.
-- **Processing**: 
-  - Assign Confidence flags (<0.7 = LOW, >0.9 = HIGH).
-  - Run business rules (REQ-08 to REQ-11).
-  - Cross-check against existing DB records for duplicates/conflicts.
-- **Output**: Validation findings and `REVIEW_REQUIRED` status.
-- **Storage**: PostgreSQL (`validation_results` table).
+## 3. Pipeline Stages Detailed
+
+### PREPROCESSING
+- **Action**: PyMuPDF & OpenCV extract pages, deskew, and denoise.
+
+### OCR_PROCESSING
+- **Action**: Call `OCRProvider`.
+- **Implementation**: Defaults to local open-source OCR (PaddleOCR/Tesseract).
+- **Fallback Logic**: If commercial OCR is configured but fails/missing key → use Local OCR.
+
+### EXTRACTING
+- **Action**: Call `ExtractionProvider`.
+- **Implementation**: Uses a layered approach:
+  1. Deterministic/rule-based extraction.
+  2. OCR text + layout information mapping.
+  3. Local/open-source model (via `LocalModelProvider` like `OllamaAdapter`), if hardware permits.
+  4. Human verification for uncertain cases.
+- **Fallback Logic**: If local AI is unavailable or extraction fails → fallback to deterministic rules → if uncertain, output blank/low-confidence and flag for Human Verification. The system MUST NEVER silently fabricate values.
+
+### CONFIDENCE_CALCULATION & VALIDATING
+- **Action**: Calculate score based on OCR confidence and field heuristics. Execute rules against PostgreSQL data and Mock LRMS adapters.
+
+## 4. Retry and Failure Requirements
+- **Idempotency**: All Celery tasks must be idempotent (no duplicate records).
+- **Retryable Errors**: Temporary network timeouts, DB locks.
+- **Non-Retryable Errors**: Total unreadability, deterministic failures.
+- **Recovery Behavior**: If all providers fail (no Commercial, no Local, no Rules), the document status updates to `FAILED` or fields are flagged as `LOW CONFIDENCE → REVIEW REQUIRED`. A human resolves it via UI.
 
 ## 5. Human Verification
-- **Input**: Flagged fields and validation findings.
-- **Processing**: Human reviews side-by-side UI, types correction, or resolves conflict.
-- **Output**: Verified values, resolution notes.
-- **Storage**: PostgreSQL (`verification_actions` table, update `field_extractions.verified_value`). Original AI value is NEVER overwritten.
+- **Input**: Flagged fields (`REVIEW_REQUIRED`) and validation findings.
+- **Processing**: Human reviews side-by-side UI. Original AI value is NEVER overwritten.
 - **Traceability**: Audit log captures User ID, Timestamp, Old Value, New Value, Reason.
 
 ## 6. Record Finalization
-- **Input**: Verified extraction.
-- **Processing**: System rolls up verified fields into the master Land Record entity.
-- **Output**: Searchable Land Record.
-- **Storage**: PostgreSQL (`land_records` table, status = `VERIFIED`).
+- **Processing**: Verified fields rolled up into searchable Land Record. Stored in PostgreSQL + PostGIS.

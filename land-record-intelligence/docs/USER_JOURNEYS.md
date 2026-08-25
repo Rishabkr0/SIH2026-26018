@@ -19,13 +19,13 @@
 - **Actor**: System (Background)
 - **Trigger**: Document added to queue.
 - **Steps**: Preprocessing -> OCR -> Extraction -> Confidence -> Validation.
-- **System Response**: Updates document status to "Review Required" or "Failed".
-- **Success State**: Structured fields and validation findings generated.
+- **System Response**: Updates document status to "Review Queue". High-confidence records may be prioritized lower or offered streamlined review, but all must pass human verification.
+- **Success State**: Structured fields and validation findings generated, waiting in the Human Verification Workspace.
 
 ## D. Low-Confidence Review
 - **Actor**: Verification Officer
 - **Trigger**: Opens "Verification Queue" and selects a document.
-- **Preconditions**: Document status is "Review Required".
+- **Preconditions**: Document status is "Review Queue".
 - **Steps**: 1. Review side-by-side UI. 2. Spot flagged (yellow/red) fields. 3. Look at source document highlight. 4. Correct text. 5. Save correction.
 - **Success State**: Field confidence indicator clears, audit log records change.
 

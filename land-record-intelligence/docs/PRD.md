@@ -839,11 +839,13 @@ OCR_PROCESSING
    ↓
 EXTRACTING
    ↓
-VALIDATING
+CONFIDENCE_SCORING
    ↓
-REVIEW_REQUIRED
+VALIDATING & RISK_CLASSIFICATION
    ↓
-VERIFIED
+REVIEW_QUEUE (Human Reviewer)
+   ↓
+VERIFIED / REJECTED
 ```
 
 Failure path:
@@ -1423,7 +1425,7 @@ Extraction
  ↓
 Validation
  ↓
-Status = REVIEW_REQUIRED / VERIFIED
+Status = REVIEW_QUEUE (Targeted Human Review)
 ```
 
 Frontend may poll processing status for the prototype.
