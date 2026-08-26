@@ -9,7 +9,8 @@ from app.models.processing import ProcessingJob, JobStatus
 from app.processing.queue import ProcessingQueue
 from app.processing.orchestrator import ProcessingOrchestrator
 from app.processing.stages.ocr import OCRStage
-from app.services.ocr.tesseract_adapter import TesseractAdapter
+from app.processing.stages.development import DevelopmentValidationStage
+from app.processing.stages.extraction_stage import ExtractionStage
 from app.core.logging import logger
 
 class ProcessingWorker:
@@ -17,9 +18,14 @@ class ProcessingWorker:
         self.worker_id = worker_id or f"worker-{uuid.uuid4().hex[:8]}"
         self.is_running = False
         
-        # Assemble pipeline
+        # The authoritative pipeline stages
+        from app.services.ocr.tesseract_adapter import TesseractAdapter
         tesseract = TesseractAdapter()
-        stages = [OCRStage(ocr_provider=tesseract)]
+        stages = [
+            OCRStage(ocr_provider=tesseract),
+            ExtractionStage()
+        ]
+        
         self.orchestrator = ProcessingOrchestrator(stages=stages)
 
     async def _claim_job(self, job_id_str: str) -> Optional[ProcessingJob]:
