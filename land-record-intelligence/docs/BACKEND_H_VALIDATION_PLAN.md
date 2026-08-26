@@ -8,34 +8,38 @@ The objective of Phase H is to implement the "Confidence + Validation" engine. T
 - **ExtractedField:** Stores the candidate `extracted_value`, `extraction_method`, `source_reference`, `bounding_box`, and `confidence`. In Phase G, `confidence` is left unassigned (stored as `0.0` due to DB constraint).
 - **ValidationFinding:** Already exists to store discrepancies (`field_name`, `finding_type`, `severity`, `message`).
 - **Document & ProcessingJob:** Existing worker pipeline executes sequentially. Phase H must execute within this job lifecycle.
-- **PostGIS:** The current DB has PostGIS available via container, but the `land_records` table **does not** contain any `Geometry` or `Geography` columns. 
+- **PostGIS:** The current DB has PostGIS available via container, but the `land_records` table **does not** contain any `Geometry` or `Geography` columns.
 
 ## 3. Confidence Model
 "Confidence" in this system is an engineering signal, not a legal certainty metric. It reflects the likelihood that the OCR reading and rule/model extraction pipeline successfully captured the true text from the document.
 - **Per-field Confidence:** Calculated for each `ExtractedField`.
-- **Record Confidence:** The lowest confidence among critical fields, or an average. In this design, we will rely on field-level confidence thresholds to trigger record-level review.
-- **Storage:** Persisted in the existing `ExtractedField.confidence` (Float) column, overwriting the `0.0` Phase G default.
+- **Record Confidence:** In this design, we will rely on individual field-level confidence thresholds to trigger record-level review.
+- **Storage:** Persisted in the existing `ExtractedField.confidence` (Float) column.
 
 ## 4. Confidence Data Sources
-Evidence legitimately available for scoring:
-1. **Extraction Method:** `RULES` (deterministic, highly reliable if matched) vs `OLLAMA` (probabilistic, prone to hallucination). Available from Phase G.
-2. **OCR Confidence:** The `confidence` of the `OCRBlock` that the rule matched. Available via `source_reference` linking back to the OCR stage.
-3. **Field Completeness:** Whether a value exists at all. Available.
-4. **Value Format Validity:** E.g., does a land area contain numbers? Available.
+Distinguishing OBSERVED EVIDENCE from DERIVED CONFIDENCE. 
+- **Observed Evidence:**
+  1. **Extraction Method:** `RULES` (deterministic, highly reliable if matched) vs `OLLAMA` (probabilistic). Available from Phase G.
+  2. **OCR Confidence:** The `confidence` of the `OCRBlock` that the rule matched. Available via `source_reference`.
+  3. **Field Completeness:** Whether a required value exists.
+  4. **Validation Evidence:** Format validity checks (e.g. numeric checks).
+- **Derived Confidence:** The final numeric score synthesized *only* from explicit evidence.
 
 ## 5. Confidence Calculation Proposal
-- If `RULES` extraction: Base confidence = OCR block confidence. If OCR confidence isn't available, default to `0.9`. 
-- If `OLLAMA` extraction: Base confidence = `0.6` (reflecting LLM uncertainty).
-- Adjustments: 
-  - Format mismatch (e.g., text in a numeric field) reduces score by `0.2`.
-- Store final float (0.0 to 1.0) in `ExtractedField.confidence`.
+- **Legitimate Numeric Generation:** Derived confidence is calculated directly from the underlying OCR block confidence.
+- **Treatment of UNKNOWN Evidence:** If OCR confidence is unavailable (or stripped by the engine), the evidence is treated strictly as **UNKNOWN**. 
+  - Do NOT use an arbitrary baseline (such as `0.9`) merely because `extraction_method == RULES`.
+  - Do NOT invent a numerical penalty or reward without an explicit, documented rationale.
+  - Do NOT convert "OCR confidence unknown" into an arbitrary numerical confidence.
+  - If a numeric score cannot be legitimately derived from the available evidence, the score remains **UNKNOWN** (logically unassigned, mapped to the DB default `0.0` if required by constraint) until sufficient evidence exists. We will not fabricate a number simply because the database expects one.
 
 ## 6. Threshold Strategy
-Defined via environment variables (following PRD defaults):
-- `CONFIDENCE_HIGH_THRESHOLD` = 0.90
-- `CONFIDENCE_REVIEW_THRESHOLD` = 0.70
-- Any field `< 0.90` (i.e., LOW or REVIEW) triggers the record to enter `PENDING_VERIFICATION`.
-These thresholds are engineering flags, not legal standards.
+Do not treat any value as an authoritative hard-coded threshold. Thresholds are prototype engineering parameters and must be configurable.
+- **Configuration Location:** `app/core/config.py` as Environment Variables.
+- **Default Values:** 
+  - `CONFIDENCE_HIGH_THRESHOLD` = 0.90
+  - `CONFIDENCE_REVIEW_THRESHOLD` = 0.70
+- **REVIEW_REQUIRED Behavior:** Any field evaluating to a derived confidence strictly below `CONFIDENCE_HIGH_THRESHOLD` (or remaining UNKNOWN) triggers the `REVIEW_REQUIRED` (Pending Verification) workflow for the entire record.
 
 ## 7. Validation Rule Catalogue
 Implemented as modular rules:
@@ -43,30 +47,32 @@ Implemented as modular rules:
 - **RULE-002 (Invalid Identifier Format):** Checks `khasra_number` for unexpected characters.
 - **RULE-003 (Invalid Land Area):** Checks `land_area` for non-numeric/impossible units.
 - **RULE-004 (Duplicate Identifier):** Queries DB for exact `khasra_number` + `village` matches.
-- **RULE-006 (Owner Conflict):** Same `khasra_number` + `village` but different `owner_name`.
+- **RULE-006 (Owner Conflict):** Strict normalized equality check (whitespace and case normalization) on `owner_name` for records with the same `khasra_number` + `village`. **Do NOT use fuzzy/Levenshtein matching**. False-positive identity/duplicate matches are more dangerous than missing a possible fuzzy match in the prototype.
 - **RULE-007 (Area Conflict):** Same identifier but different `land_area`.
 
 ## 8. Validation Severity Model
-Using `FindingSeverity` enum:
-- `CRITICAL`: Missing mandatory identifiers (e.g. Khasra). Blocks automated acceptance.
-- `HIGH`: Value format mismatch or duplicate identifier detected. Blocks automated acceptance.
-- `MEDIUM`: Low confidence extraction. Blocks automated acceptance.
-- `LOW`: Minor formatting quirks. Flagged but doesn't block.
+Using `FindingSeverity` enum to categorize findings into **BLOCKING** vs **NON-BLOCKING**. The authoritative documents (`PRD.md`, `REQUIREMENTS_MATRIX.md`, etc.) do not explicitly specify whether `MEDIUM` findings block the entire record. Therefore, we explicitly distinguish them as a prototype decision:
+- **BLOCKING Findings:**
+  - `CRITICAL`: Missing mandatory identifiers (e.g. Khasra). Forces record to `PENDING_VERIFICATION` or `FAILED`.
+  - `HIGH`: Value format mismatch, duplicate identifier, or owner conflict detected. Forces record to `PENDING_VERIFICATION` or `CONFLICT`.
+- **NON-BLOCKING Findings:**
+  - `MEDIUM`: Low confidence extraction. *(Note: Not specified by authoritative project documentation to block the entire record solely based on severity, but low confidence rules described in Section 6 will independently trigger review. The finding itself is non-blocking)*
+  - `LOW`: Minor formatting quirks. Flagged on the field for UI information but does not halt automated acceptance.
 
 ## 9. REVIEW_REQUIRED State Logic
 - Transition: `Extraction Stage` -> `Validation Stage`.
-- If *any* `CRITICAL` or `HIGH` or `MEDIUM` validation finding is generated, or if any field has `confidence < 0.90`, the `LandRecord.status` remains or becomes `PENDING_VERIFICATION`.
+- **Exact Review-Trigger Logic:** A single **BLOCKING** validation finding (`CRITICAL` or `HIGH`) or a single field with derived confidence below `CONFIDENCE_HIGH_THRESHOLD` (or UNKNOWN) causes the **entire record** to become `PENDING_VERIFICATION`. Individual fields retain their specific validation findings for UI highlighting.
 - If duplicate conflicts are detected (RULE-004/006/007), status becomes `CONFLICT`.
-- If 0 findings and all confidences `>= 0.90`, status becomes `VERIFIED` (Automated Acceptance).
+- If 0 blocking findings and all confidences >= `CONFIDENCE_HIGH_THRESHOLD`, status becomes `VERIFIED` (Automated Acceptance).
 
 ## 10. PostGIS Duplicate Strategy
-The PRD asks for duplicate detection (Levels 1-5). Levels 1-3 rely on string matching (khasra, owner, area) which is perfectly feasible via SQLAlchemy. Level 4/5 involve location.
-- **Strategy:** Query existing `LandRecord` tables using `village`, `khasra_number`, and `khata_number` string matching.
+Explicitly distinguish: **RELATIONAL DUPLICATE DETECTION** vs **TRUE SPATIAL DUPLICATE DETECTION**.
+- **Strategy:** Implement RELATIONAL duplicate detection using available string fields: normalized `khasra_number` + normalized `village`.
 - **Result:** Generate `ValidationFinding` of type `CONFLICT` if matching records are found.
 
 ## 11. Spatial-Data Limitations
-- **Current Limitation:** The `LandRecord` table has no geometry. Pure PostGIS spatial intersections (e.g., polygon overlaps) cannot be executed.
-- **Resolution:** Duplicate detection will rely purely on relational string matches (Identifier + Village) for the prototype. Spatial duplicate detection is blocked until Phase J introduces synthetic/cadastral geometries. We will not fabricate coordinates.
+- **Current Limitation:** The `LandRecord` table has no geometry. 
+- **Resolution:** Do NOT add a Geometry column to `land_records` in Phase H. Do NOT fabricate coordinates. True PostGIS spatial validation remains future work until legitimate geometry data is available.
 
 ## 12. Processing Pipeline Integration
 - **New Stage:** `ValidationStage` inheriting from `ProcessingStage`.
@@ -81,7 +87,7 @@ The PRD asks for duplicate detection (Levels 1-5). Levels 1-3 rely on string mat
 
 ## 15. Provenance/Audit Behavior
 - `ValidationFinding` natively stores `expected_value`, `actual_value`, and `field_name`.
-- We will NOT spam `AuditEvent` for background pipeline validations. Audit events are strictly for Phase I human verification (e.g., when a user corrects a field or resolves a finding).
+- We will NOT spam `AuditEvent` for background pipeline validations. Audit events are strictly for Phase I human verification.
 
 ## 16. Testing Strategy
 - **Unit Tests:** `ConfidenceEngine` and `ValidationRules` isolated with mock `ExtractedField` arrays.
@@ -91,13 +97,12 @@ The PRD asks for duplicate detection (Levels 1-5). Levels 1-3 rely on string mat
 ## 17. Zero-Cost Compliance
 - Fully compliant. Uses local PostgreSQL queries and Python logic. No paid validation APIs or cloud GIS layers are required.
 
-## 18. Risks
-- String matching for duplicates (e.g., "Ramesh" vs "Rames") might miss slight misspellings.
-- OCR confidence is highly variable between engines (Tesseract vs PaddleOCR); a strict 0.9 threshold might send 99% of documents to manual review.
+## 18. Remaining Limitations
+- Relational string matching for duplicates (e.g. strict normalized names) will miss misspellings, but fuzzy matching is intentionally avoided to prevent dangerous false positives.
+- True confidence calculation is heavily reliant on OCR engine quality. If the OCR engine does not emit block-level confidences, all fields will route to `PENDING_VERIFICATION` because we intentionally avoid fabricating default confidences.
 
 ## 19. Open Questions
-- Should `fuzzy` text matching (e.g., Levenshtein distance) be implemented for Owner Name duplicate checks in Postgres, or strict equality?
-- If an OCR block has no confidence score natively, what is the default penalty?
+- None at this time. All previously ambiguous rules have been resolved based on authoritative documents or explicitly identified as prototype decisions.
 
 ## 20. Exact Files Expected to Change
 - `backend/app/services/validation/engine.py` (New)
@@ -105,12 +110,12 @@ The PRD asks for duplicate detection (Levels 1-5). Levels 1-3 rely on string mat
 - `backend/app/services/validation/confidence.py` (New)
 - `backend/app/processing/stages/validation_stage.py` (New)
 - `backend/app/processing/orchestrator.py` (Modify to register `ValidationStage`)
-- `backend/app/core/config.py` (Add Thresholds)
+- `backend/app/core/config.py` (Add Configurable Thresholds)
 - `backend/tests/unit/test_validation.py` (New)
 - `backend/tests/integration/test_validation_stage.py` (New)
 
 ## 21. Explicit List of Things That Must NOT Be Changed
 - The `ExtractionStage` and its providers (Phase G) must not be rewritten.
 - The database schema must not be migrated to add geometry yet.
-- Phase I (Human UI endpoints) must not be built.
 - Do not fabricate confidence scores inside Phase G.
+- **Phase Boundaries:** Do NOT implement human verification UI, field correction workflow, reviewer approval UI, or GIS UI. These strictly belong to Phase I/J.

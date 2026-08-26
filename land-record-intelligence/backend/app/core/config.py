@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     OLLAMA_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "mistral"
     EXTRACTION_CONFIDENCE_THRESHOLD: float = 0.8
+    
+    CONFIDENCE_HIGH_THRESHOLD: float = 0.90
+    CONFIDENCE_REVIEW_THRESHOLD: float = 0.70
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

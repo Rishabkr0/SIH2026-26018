@@ -11,6 +11,7 @@ from app.processing.orchestrator import ProcessingOrchestrator
 from app.processing.stages.ocr import OCRStage
 from app.processing.stages.development import DevelopmentValidationStage
 from app.processing.stages.extraction_stage import ExtractionStage
+from app.processing.stages.validation_stage import ValidationStage
 from app.core.logging import logger
 
 class ProcessingWorker:
@@ -23,7 +24,8 @@ class ProcessingWorker:
         tesseract = TesseractAdapter()
         stages = [
             OCRStage(ocr_provider=tesseract),
-            ExtractionStage()
+            ExtractionStage(),
+            ValidationStage()
         ]
         
         self.orchestrator = ProcessingOrchestrator(stages=stages)
